@@ -24,6 +24,9 @@
   <!-- Supabase (cloud database) -->
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 
+  <!-- Google Gemini API (dynamic Q&A) -->
+  <script src="https://cdn.jsdelivr.net/npm/@google/generative-ai"></script>
+
   <!-- Babel (JSX compiler) -->
   <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
 
@@ -2437,6 +2440,52 @@ const TOTAL_EVENTS = Object.values(MASTER_HISTORY_DB).reduce((s,arr)=>s+arr.leng
 const SUPABASE_URL = "https://uqffmwynbarepcdvlkcu.supabase.co";
 const SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InVxZmZtd3luYmFyZXBjZHZsa2N1Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzgyOTE0MjAsImV4cCI6MjA5Mzg2NzQyMH0.uePAl2CUguqf4lScDFCdAo4X2BasdRETTPyqs64j_VE";
 
+/* ════════════════════════════════════════════════════════════════
+   GOOGLE GEMINI API  (Dynamic Q&A with AI)
+   ══════════════════════════════════════════════════════════════
+   ① Go to https://aistudio.google.com/apikey
+   ② Click "Create API Key"
+   ③ Paste it below (replace YOUR_GEMINI_API_KEY)
+   ⚠️  KEEP THIS KEY PRIVATE — never share it publicly
+   ══════════════════════════════════════════════════════════════ */
+const GEMINI_API_KEY = "AIzaSyAfoVdobNZZtzZ4mFvSDvZjdH_O-idfsPQ";
+
+/* Initialize Gemini client */
+const _gemini = (GEMINI_API_KEY && GEMINI_API_KEY.startsWith("AIza"))
+  ? new window.GoogleGenerativeAI.GoogleGenerativeAI(GEMINI_API_KEY)
+  : null;
+
+/* Call Gemini API for dynamic Q&A */
+async function askGemini(question, regionName, storyContext) {
+  if (!_gemini) {
+    return "抱歉，我現在無法連線到我的大腦。請稍後再試！😅";
+  }
+
+  try {
+    const model = _gemini.getGenerativeModel({ model: "gemini-1.5-flash" });
+
+    const systemPrompt = `你現在是一隻名叫薩摩耶的歷史導遊狗。你正在幫玩家探索【${regionName}】的歷史。
+玩家剛讀了這段歷史故事：「${storyContext}」
+現在，玩家問了你一個問題。請用可愛、熱情且富含教育意義的語氣回答。
+重要：回答必須簡短，限制在 100 字以內。`;
+
+    const response = await model.generateContent({
+      contents: [
+        {
+          role: "user",
+          parts: [{ text: systemPrompt + "\n\n玩家的問題：" + question }],
+        },
+      ],
+    });
+
+    const text = response.response.text().trim();
+    return text.length > 100 ? text.substring(0, 97) + "..." : text;
+  } catch (e) {
+    console.error("Gemini API error:", e);
+    return "嗯...我一時想不起來！不過這個問題很棒呢！🐾";
+  }
+}
+
 /* Initialise client — gracefully disabled until URL is configured */
 const _db = (SUPABASE_URL.startsWith("https://"))
   ? window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY)
@@ -2789,15 +2838,17 @@ if(!followupQ.trim()||isLoading) return;
 setIsLoading(true);
 const q = followupQ;
 const name = guideRegion.name;
-const ev = chosenEvent?.title??"這段歷史";
-await new Promise(r=>setTimeout(r,800));
-setDialogLines([
-`關於「${q}」，問得很好！`,
-`在${name}的${ev}中，這確實是一個值得深思的面向。`,
-`歷史學家們對此有不同的解讀，有人認為是外部壓力使然，也有人認為是內部矛盾積累的結果。`,
-`建議你查閱更多文獻，從不同角度去理解這段歷史喔！📚`,
-]);
+const storyText = storyLines.join(" ");
 setDialogPhase("answered");
+setDialogLines(["薩摩耶思考中... 🐾"]);
+
+try {
+  const answer = await askGemini(q, name, storyText);
+  setDialogLines([answer]);
+} catch(e) {
+  console.error("Q&A error:", e);
+  setDialogLines(["嗯...我一時想不起來！不過這個問題很棒呢！🐾"]);
+}
 setIsLoading(false);
 };
 if(!guideOpen||!guideRegion) return null;
