@@ -24,9 +24,6 @@
   <!-- Supabase (cloud database) -->
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 
-  <!-- Google Gemini API (dynamic Q&A) -->
-  <script src="https://cdn.jsdelivr.net/npm/@google/generative-ai"></script>
-
   <!-- Babel (JSX compiler) -->
   <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
 
@@ -2449,40 +2446,57 @@ const SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZ
    ⚠️  KEEP THIS KEY PRIVATE — never share it publicly
    ══════════════════════════════════════════════════════════════ */
 const GEMINI_API_KEY = "AIzaSyAfoVdobNZZtzZ4mFvSDvZjdH_O-idfsPQ";
+const GEMINI_ENDPOINT = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent";
 
-/* Initialize Gemini client */
-const _gemini = (GEMINI_API_KEY && GEMINI_API_KEY.startsWith("AIza"))
-  ? new window.GoogleGenerativeAI.GoogleGenerativeAI(GEMINI_API_KEY)
-  : null;
-
-/* Call Gemini API for dynamic Q&A */
+/* Call Gemini REST API for dynamic Q&A — zero SDK, pure fetch */
 async function askGemini(question, regionName, storyContext) {
-  if (!_gemini) {
-    return "抱歉，我現在無法連線到我的大腦。請稍後再試！😅";
+  if (!GEMINI_API_KEY || !GEMINI_API_KEY.startsWith("AIza")) {
+    return "哎呀，我的通訊器壞掉了...請稍後再試！🐾";
   }
 
-  try {
-    const model = _gemini.getGenerativeModel({ model: "gemini-1.5-flash" });
+  const systemPrompt = `【角色設定】
+你是一隻名叫「薩摩耶」的歷史精靈老師，專門為 6 到 14 歲的小朋友解答歷史問題。
+語氣規則：溫柔、可愛、充滿鼓勵，像一隻熱情的小狗老師在跟小朋友聊天。適當使用「汪！」「🐾」等可愛表達。
 
-    const systemPrompt = `你現在是一隻名叫薩摩耶的歷史導遊狗。你正在幫玩家探索【${regionName}】的歷史。
+【當前情境】
+你正在幫玩家探索「${regionName}」的歷史。
 玩家剛讀了這段歷史故事：「${storyContext}」
-現在，玩家問了你一個問題。請用可愛、熱情且富含教育意義的語氣回答。
-重要：回答必須簡短，限制在 100 字以內。`;
 
-    const response = await model.generateContent({
-      contents: [
-        {
-          role: "user",
-          parts: [{ text: systemPrompt + "\n\n玩家的問題：" + question }],
-        },
-      ],
+【回答規則】
+1. 回答必須精簡直接，控制在 5 到 6 句話以內。
+2. 用繁體中文回答。
+3. 回答要有教育意義，幫助小朋友理解歷史。
+
+【防偏題機制】
+如果玩家問了跟歷史或「${regionName}」完全無關的問題（例如數學、寫程式、或隨意亂打的字），
+你必須委婉拒絕，並把話題拉回歷史。
+回覆範例：「汪！我是一隻歷史精靈，只懂歷史故事喔！🐾 我們來聊聊關於${regionName}的事情好嗎？」`;
+
+  try {
+    const res = await fetch(GEMINI_ENDPOINT + "?key=" + GEMINI_API_KEY, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        system_instruction: { parts: [{ text: systemPrompt }] },
+        contents: [{ role: "user", parts: [{ text: question }] }],
+        generationConfig: { maxOutputTokens: 200, temperature: 0.7 },
+      }),
     });
 
-    const text = response.response.text().trim();
-    return text.length > 100 ? text.substring(0, 97) + "..." : text;
+    if (!res.ok) {
+      const errText = await res.text();
+      console.error("Gemini HTTP", res.status, errText);
+      if (res.status === 429) return "汪...我回答太多問題有點累了，休息一下再來問我吧！🐾💤";
+      return "嗯...我一時想不起來，但這個問題很棒呢！🐾";
+    }
+
+    const data = await res.json();
+    const text = data?.candidates?.[0]?.content?.parts?.[0]?.text?.trim();
+    if (!text) return "汪...我好像聽不太懂，可以換個方式問問看嗎？🐾";
+    return text;
   } catch (e) {
     console.error("Gemini API error:", e);
-    return "嗯...我一時想不起來！不過這個問題很棒呢！🐾";
+    return "哎呀，我的通訊器壞掉了...請稍後再試！🐾";
   }
 }
 
